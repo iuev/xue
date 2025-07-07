@@ -4,7 +4,7 @@ var WidgetMetadata = {
     description: "获取 Jable.tv 的热门和最新影片",
     author: "Gemini",
     site: "https://jable.tv",
-    version: "1.0.0",
+    version: "1.0.1",
     requiredVersion: "0.0.1",
     detailCacheDuration: 600, // 详情缓存10分钟
     modules: [
