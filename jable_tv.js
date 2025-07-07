@@ -1,11 +1,11 @@
 
-var WidgetMetadata = {
-    id: "jable.tv",
-    title: "Jable TV",
-    description: "一个用于浏览 Jable TV 的 ForwardWidget 模块。",
+WidgetMetadata = {
+    id: "jable.tv.gemini",
+    title: "Jable TV (Gemini)",
+    description: "获取 Jable 视频。基于 javdb.js 模板重构。",
     author: "Gemini",
     site: "https://jable.tv/",
-    version: "1.1.0",
+    version: "2.0.0",
     requiredVersion: "0.0.1",
     detailCacheDuration: 600,
     modules: [
@@ -14,25 +14,52 @@ var WidgetMetadata = {
             description: "当前最热门的影片",
             requiresWebView: false,
             functionName: "loadPage",
-            sectionMode: true,
             cacheDuration: 3600,
             params: [
-                { name: "url", type: "constant", value: "https://jable.tv/hot/" },
-                { name: "title", type: "constant", value: "热门影片" },
-                { name: "page", title: "页码", type: "page", value: 1 }
+                {
+                    name: "url",
+                    type: "constant",
+                    value: "https://jable.tv/hot/?mode=async&function=get_block&block_id=list_videos_common_videos_list"
+                },
+                {
+                    name: "sort_by",
+                    title: "排序",
+                    type: "enumeration",
+                    enumOptions: [
+                        { title: "今日热门", value: "video_viewed_today" },
+                        { title: "本周热门", value: "video_viewed_week" },
+                        { title: "本月热门", value: "video_viewed_month" },
+                        { title: "所有时间", value: "video_viewed" },
+                    ],
+                    value: "video_viewed_today"
+                },
+                { name: "from", title: "页码", type: "page", value: 1 }
             ]
         },
         {
-            title: "最新上市影片",
-            description: "最新发布的影片",
+            title: "最新上市",
+            description: "最新上市的影片",
             requiresWebView: false,
             functionName: "loadPage",
-            sectionMode: true,
             cacheDuration: 3600,
             params: [
-                { name: "url", type: "constant", value: "https://jable.tv/latest-updates/" },
-                { name: "title", type: "constant", value: "最新上市影片" },
-                { name: "page", title: "页码", type: "page", value: 1 }
+                {
+                    name: "url",
+                    type: "constant",
+                    value: "https://jable.tv/new-release/?mode=async&function=get_block&block_id=list_videos_common_videos_list"
+                },
+                 {
+                    name: "sort_by",
+                    title: "排序",
+                    type: "enumeration",
+                    enumOptions: [
+                        { title: "最新发布", value: "latest-updates" },
+                        { title: "最多观看", value: "video_viewed" },
+                        { title: "最多收藏", value: "most_favourited" },
+                    ],
+                    value: "latest-updates"
+                },
+                { name: "from", title: "页码", type: "page", value: 1 }
             ]
         }
     ],
@@ -41,96 +68,95 @@ var WidgetMetadata = {
         functionName: "search",
         params: [
             { name: "keyword", title: "关键词", type: "input" },
-            { name: "page", title: "页码", type: "page", value: 1 }
+            {
+                name: "sort_by",
+                title: "排序",
+                type: "enumeration",
+                enumOptions: [
+                    { title: "最多观看", value: "video_viewed" },
+                    { title: "近期最佳", value: "post_date_and_popularity" },
+                    { title: "最近更新", value: "post_date" },
+                    { title: "最多收藏", value: "most_favourited" },
+                ],
+                 value: "post_date_and_popularity"
+            },
+            { name: "from", title: "页码", type: "page", value: 1 },
         ]
     }
 };
 
-async function loadPage(params = {}) {
-    const page = params.page > 1 ? `page/${params.page}/` : '';
-    const url = `${params.url}${page}`;
-    const items = await parseVideoList(url);
-    return [{ 
-        title: params.title, 
-        childItems: items 
-    }];
-}
-
 async function search(params = {}) {
-    const keyword = encodeURIComponent(params.keyword || "");
-    const page = params.page || 1;
-    // Jable's search uses a `from` parameter for pagination, not a path like other pages.
-    const url = `https://jable.tv/search/${keyword}/?from=${page}`;
-    // Search results are a flat list, not a section.
-    return await parseVideoList(url);
+  const keyword = encodeURIComponent(params.keyword || "");
+  const url = `https://jable.tv/search/${keyword}/?mode=async&function=get_block&block_id=list_videos_videos_list_search_result&q=${keyword}`;
+  return await loadPage({ ...params, url });
 }
 
-async function parseVideoList(url) {
-    try {
-        const response = await Widget.http.get(url, {
-            headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-            }
-        });
-
-        const $ = Widget.html.load(response.data);
-        const result = [];
-
-        $('div.card.h-100').each((i, el) => {
-            const element = $(el);
-            const titleAnchor = element.find('h6.card-title a');
-            const link = titleAnchor.attr('href');
-            
-            if (!link || !link.includes('/videos/')) return;
-
-            const id = link.split('/videos/')[1].replace('/', '');
-            const title = titleAnchor.text();
-            const coverUrl = element.find('div.card-img-top img').attr('src');
-            const releaseDate = element.find('div.d-flex.justify-content-between span.text-truncate').eq(1).text();
-
-            result.push({
-                id: id,
-                type: 'url',
-                title: title,
-                posterPath: coverUrl,
-                backdropPath: coverUrl,
-                link: link,
-                releaseDate: releaseDate.trim(),
-                mediaType: 'movie'
-            });
-        });
-        
-        return result;
-
-    } catch (error) {
-        console.error(`解析视频列表失败: ${url}`, error);
-        throw error;
+async function loadPage(params = {}) {
+    let url = params.url;
+    if (params.sort_by) {
+      url += `&sort_by=${params.sort_by}`;
     }
+    if (params.from) {
+      url += `&from=${params.from}`;
+    }
+
+    const response = await Widget.http.get(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+      },
+    });
+
+    const $ = Widget.html.load(response.data);
+    const items = [];
+
+    $('.video-img-box').each((i, el) => {
+        const $item = $(el);
+        const linkElement = $item.find('.title a').first();
+        const link = linkElement.attr('href');
+
+        if (link && link.includes('jable.tv/videos/')) {
+            const imgElement = $item.find('img').first();
+            const cover = imgElement.attr('data-src');
+            const previewVideo = imgElement.attr('data-preview');
+            const title = linkElement.text();
+            const duration = $item.find('.absolute-bottom-right .label').text().trim();
+            
+            items.push({
+                id: link, // Use the full link as ID
+                type: "url",
+                title: title,
+                posterPath: cover,
+                backdropPath: cover,
+                previewUrl: previewVideo,
+                link: link,
+                mediaType: "movie",
+                durationText: duration,
+                description: duration
+            });
+        }
+    });
+
+    return items;
 }
 
 async function loadDetail(link) {
-    try {
-        const response = await Widget.http.get(link, {
-            headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                "Referer": "https://jable.tv/"
-            },
-        });
+  const response = await Widget.http.get(link, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    },
+  });
 
-        const match = response.data.match(/var hlsUrl = '(.*?)';/);
-        if (!match || !match[1]) {
-            throw new Error("无法在页面中找到 hlsUrl");
-        }
-        const hlsUrl = match[1];
+  const match = response.data.match(/var hlsUrl = '(.*?)';/);
+  if (!match || !match[1]) {
+    throw new Error("无法获取 HLS URL");
+  }
+  const hlsUrl = match[1];
 
-        return {
-            videoUrl: hlsUrl,
-            customHeaders: {
-                "Referer": link
-            }
-        };
-    } catch (error) {
-        console.error(`加载详情页失败: ${link}`, error);
-        throw error;
-    }
+  return {
+    videoUrl: hlsUrl,
+    customHeaders: {
+      "Referer": link,
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    },
+  };
 }
