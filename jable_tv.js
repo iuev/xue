@@ -1,4 +1,3 @@
-
 var WidgetMetadata = {
     id: "forward.jable",
     title: "Jable",
@@ -110,7 +109,7 @@ async function parseVideoListPage(url) {
  */
 async function getPopularVideos(params = {}) {
     const page = params.page || 1;
-    const url = `https://jable.tv/popular/?page=${page}`;
+    const url = `https://jable.tv/videos/?sort=hot&page=${page}`;
     return await parseVideoListPage(url);
 }
 
@@ -121,7 +120,7 @@ async function getPopularVideos(params = {}) {
  */
 async function getLatestVideos(params = {}) {
     const page = params.page || 1;
-    const url = `https://jable.tv/latest-updates/?page=${page}`;
+    const url = `https://jable.tv/videos/?sort=new&page=${page}`;
     return await parseVideoListPage(url);
 }
 
@@ -138,7 +137,6 @@ async function search(params = {}) {
     }
     const url = `https://jable.tv/search/${query}/?page=${page}`;
     return await parseVideoListPage(url);
-}
 
 
 /**
@@ -157,8 +155,8 @@ async function loadDetail(link) {
         });
         const html = response.data;
 
-        // 使用正则表达式从页面脚本中匹配 m3u8 地址
-        const match = html.match(/hls\.loadSource\s*\(\s*['"](https?:\/\/[^'"]+\.m3u8)['"]\s*\)/);
+        // 更新正则表达式，以更精确地匹配播放器配置中的 m3u8 地址
+        const match = html.match(/(?:url|src)['"]?\s*:\s*['"](https?:\/\/[^'"]*m3u8[^'"]*)['"]/);
 
         if (match && match[1]) {
             const videoUrl = match[1];
