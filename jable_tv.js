@@ -1,161 +1,177 @@
-WidgetMetadata = {
-    id: "jabletv.gemini.final",
-    title: "Jable TV (Corrected)",
-    description: "获取 Jable 视频 (严格遵循 javdb.js 模板)",
+
+var WidgetMetadata = {
+    id: "forward.jable",
+    title: "Jable",
+    description: "获取 Jable.tv 的热门和最新影片",
     author: "Gemini",
-    site: "https://jable.tv/",
-    version: "3.0.0",
+    site: "https://jable.tv",
+    version: "1.0.0",
     requiredVersion: "0.0.1",
-    detailCacheDuration: 3600,
+    detailCacheDuration: 600, // 详情缓存10分钟
     modules: [
         {
-            title: "搜索",
-            functionName: "search",
-            params: [
-                { name: "keyword", title: "关键词", type: "input" },
-                {
-                    name: "sort_by",
-                    title: "排序",
-                    type: "enumeration",
-                    enumOptions: [
-                        { title: "最多观看", value: "video_viewed" },
-                        { title: "近期最佳", value: "post_date_and_popularity" },
-                        { title: "最近更新", value: "post_date" },
-                        { title: "最多收藏", value: "most_favourited" },
-                    ]
-                },
-                { name: "from", title: "页码", type: "page", value: 1 },
-            ]
-        },
-        {
             title: "热门影片",
-            functionName: "loadPage",
+            functionName: "getPopularVideos",
+            cacheDuration: 3600, // 列表缓存1小时
             params: [
                 {
-                    name: "url",
-                    type: "constant",
-                    value: "https://jable.tv/hot/?mode=async&function=get_block&block_id=list_videos_common_videos_list"
-                },
-                {
-                    name: "sort_by",
-                    title: "排序",
-                    type: "enumeration",
-                    enumOptions: [
-                        { title: "今日热门", value: "video_viewed_today" },
-                        { title: "本周热门", value: "video_viewed_week" },
-                        { title: "本月热门", value: "video_viewed_month" },
-                        { title: "所有时间", value: "video_viewed" },
-                    ]
-                },
-                { name: "from", title: "页码", type: "page", value: 1 }
+                    name: "page",
+                    title: "页码",
+                    type: "page"
+                }
             ]
         },
         {
             title: "最新上市",
-            functionName: "loadPage",
+            functionName: "getLatestVideos",
+            cacheDuration: 3600, // 列表缓存1小时
             params: [
                 {
-                    name: "url",
-                    type: "constant",
-                    value: "https://jable.tv/new-release/?mode=async&function=get_block&block_id=list_videos_common_videos_list"
-                },
-                 {
-                    name: "sort_by",
-                    title: "排序",
-                    type: "enumeration",
-                    enumOptions: [
-                        { title: "最新发布", value: "latest-updates" },
-                        { title: "最多观看", value: "video_viewed" },
-                        { title: "最多收藏", value: "most_favourited" },
-                    ]
-                },
-                { name: "from", title: "页码", type: "page", value: 1 }
+                    name: "page",
+                    title: "页码",
+                    type: "page"
+                }
             ]
         }
-    ]
+    ],
+    search: {
+        title: "搜索",
+        functionName: "search",
+        params: [
+            {
+                name: "query",
+                title: "关键词",
+                type: "input"
+            },
+            {
+                name: "page",
+                title: "页码",
+                type: "page"
+            }
+        ]
+    }
 };
 
+/**
+ * 通用的列表页面解析函数
+ * @param {string} url 页面地址
+ * @returns {Promise<Object[]>} 视频项目数组
+ */
+async function parseVideoListPage(url) {
+    try {
+        console.log(`请求列表页面: ${url}`);
+        const response = await Widget.http.get(url, {
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+                "Referer": "https://jable.tv/"
+            }
+        });
+
+        if (!response || !response.data) {
+            throw new Error("获取页面数据失败");
+        }
+
+        const $ = Widget.html.load(response.data);
+        const videoElements = $('div.video-item');
+
+        if (videoElements.length === 0) {
+            console.log("在页面上未找到视频项目");
+            return [];
+        }
+
+        return videoElements.map((index, element) => {
+            const $el = $(element);
+            const link = $el.find('a').attr('href');
+            const cover = $el.find('a img').attr('src');
+            const title = $el.find('.card-body h6.title').text().trim();
+            const duration = $el.find('.card-body .duration').text().trim();
+            const info = $el.find('.card-body .card-info').text().trim();
+
+            return {
+                id: link,
+                type: 'link',
+                title: title,
+                posterPath: cover,
+                durationText: duration,
+                description: info,
+                link: link
+            };
+        }).get();
+    } catch (error) {
+        console.error(`解析列表页面失败 ${url}:`, error);
+        throw error;
+    }
+}
+
+/**
+ * 获取热门影片
+ * @param {Object} params 参数对象，包含 page
+ * @returns {Promise<Object[]>}
+ */
+async function getPopularVideos(params = {}) {
+    const page = params.page || 1;
+    const url = `https://jable.tv/popular/?page=${page}`;
+    return await parseVideoListPage(url);
+}
+
+/**
+ * 获取最新上市影片
+ * @param {Object} params 参数对象，包含 page
+ * @returns {Promise<Object[]>}
+ */
+async function getLatestVideos(params = {}) {
+    const page = params.page || 1;
+    const url = `https://jable.tv/latest-updates/?page=${page}`;
+    return await parseVideoListPage(url);
+}
+
+/**
+ * 搜索影片
+ * @param {Object} params 参数对象，包含 query 和 page
+ * @returns {Promise<Object[]>}
+ */
 async function search(params = {}) {
-  const keyword = encodeURIComponent(params.keyword || "");
-  let url = `https://jable.tv/search/${keyword}/?mode=async&function=get_block&block_id=list_videos_videos_list_search_result&q=${keyword}`;
-  return await loadPage({ ...params, url });
-}
-
-async function loadPage(params = {}) {
-  const sections = await loadPageSections(params);
-  const items = sections.flatMap((section) => section.childItems);
-  return items;
-}
-
-async function loadPageSections(params = {}) {
-    let url = params.url;
-    if (params.sort_by) {
-      url += `&sort_by=${params.sort_by}`;
+    const query = encodeURIComponent(params.query || '');
+    const page = params.page || 1;
+    if (!query) {
+        return [];
     }
-    if (params.from) {
-      url += `&from=${params.from}`;
-    }
-
-    const response = await Widget.http.get(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-      },
-    });
-    return parseHtml(response.data);
+    const url = `https://jable.tv/search/${query}/?page=${page}`;
+    return await parseVideoListPage(url);
 }
 
-function parseHtml(htmlContent) {
-  const $ = Widget.html.load(htmlContent);
-  const items = [];
-  $('.video-img-box').each((i, el) => {
-      const $item = $(el);
-      const linkElement = $item.find('.title a').first();
-      const link = linkElement.attr('href');
 
-      if (link && link.includes('jable.tv/videos/')) {
-          const imgElement = $item.find('img').first();
-          const cover = imgElement.attr('data-src');
-          const previewVideo = imgElement.attr('data-preview');
-          const title = linkElement.text();
-          const duration = $item.find('.absolute-bottom-right .label').text().trim();
-          
-          items.push({
-              id: link,
-              type: "url",
-              title: title,
-              posterPath: cover,
-              backdropPath: cover,
-              previewUrl: previewVideo,
-              link: link,
-              mediaType: "movie",
-              durationText: duration,
-              description: duration
-          });
-      }
-  });
-  // The working script returns an array containing a single section object with an empty title.
-  // This is what loadPage then flattens.
-  return [{ title: "", childItems: items }];
-}
-
+/**
+ * 加载详情页，提取视频播放地址
+ * @param {string} link 详情页链接
+ * @returns {Promise<{videoUrl: string}>}
+ */
 async function loadDetail(link) {
-  const response = await Widget.http.get(link, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-    },
-  });
+    try {
+        console.log(`请求详情页面: ${link}`);
+        const response = await Widget.http.get(link, {
+             headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+                "Referer": "https://jable.tv/"
+            }
+        });
+        const html = response.data;
 
-  const match = response.data.match(/var hlsUrl = '(.*?)';/);
-  if (!match || !match[1]) {
-    throw new Error("无法获取 HLS URL");
-  }
-  const hlsUrl = match[1];
+        // 使用正则表达式从页面脚本中匹配 m3u8 地址
+        const match = html.match(/hls\.loadSource\s*\(\s*['"](https?:\/\/[^'"]+\.m3u8)['"]\s*\)/);
 
-  return {
-    videoUrl: hlsUrl,
-    customHeaders: {
-      "Referer": link,
-      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-    },
-  };
+        if (match && match[1]) {
+            const videoUrl = match[1];
+            console.log(`成功提取到 videoUrl: ${videoUrl}`);
+            return {
+                videoUrl: videoUrl
+            };
+        } else {
+            console.error("在页面HTML中未找到 videoUrl");
+            throw new Error("在页面中未找到 videoUrl");
+        }
+    } catch (error) {
+        console.error(`加载详情页面失败 ${link}:`, error);
+        throw error;
+    }
 }
