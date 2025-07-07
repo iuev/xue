@@ -1,13 +1,12 @@
-
 var WidgetMetadata = {
     id: "jable.tv",
     title: "Jable TV",
     description: "Jable TV 的非官方 ForwardWidget 模块",
     author: "Gemini",
     site: "https://jable.tv/",
-    version: "1.0.0",
+    version: "1.0.1", // Incremented version
     requiredVersion: "0.0.1",
-    detailCacheDuration: 600, // 详情缓存10分钟
+    detailCacheDuration: 600,
     modules: [
         {
             title: "热门影片",
@@ -15,7 +14,7 @@ var WidgetMetadata = {
             requiresWebView: false,
             functionName: "getHotVideos",
             sectionMode: true,
-            cacheDuration: 3600, // 缓存1小时
+            cacheDuration: 3600,
             params: [
                 {
                     name: "page",
@@ -31,7 +30,7 @@ var WidgetMetadata = {
             requiresWebView: false,
             functionName: "getLatestVideos",
             sectionMode: true,
-            cacheDuration: 3600, // 缓存1小时
+            cacheDuration: 3600,
             params: [
                 {
                     name: "page",
@@ -58,37 +57,39 @@ async function parseVideoList(url) {
             }
         });
 
-        const docId = Widget.dom.parse(response.data);
-        const videoElements = Widget.dom.select(docId, 'div.card.h-100');
+        // 使用 Widget.html.load 获取 cheerio 实例
+        const $ = Widget.html.load(response.data);
+        const result = [];
 
-        const result = videoElements.map((element) => {
-            const titleElement = Widget.dom.select(element, 'h6.card-title a')[0];
-            const title = Widget.dom.text(titleElement);
-            const link = Widget.dom.attr(titleElement, 'href');
+        $('div.card.h-100').each((i, el) => {
+            const element = $(el);
+            const titleAnchor = element.find('h6.card-title a');
             
-            // 从链接中提取唯一ID，例如 https://jable.tv/videos/ssis-932/ -> ssis-932
-            const id = link.split('/videos/')[1].replace('/', '');
-
-            const coverUrl = Widget.dom.attr(Widget.dom.select(element, 'div.card-img-top img')[0], 'src');
+            const title = titleAnchor.text();
+            const link = titleAnchor.attr('href');
             
-            // 尝试获取发布日期，第二个span通常是日期
-            let releaseDate = '';
-            try {
-                 releaseDate = Widget.dom.text(Widget.dom.select(element, 'div.d-flex.justify-content-between span.text-truncate')[1]);
-            } catch(e) {
-                console.log("无法解析发布日期");
+            if (!link) {
+                console.log("Skipping card without a link.");
+                return; // continue to next iteration
             }
 
-            return {
+            // 从链接中提取唯一ID
+            const id = link.split('/videos/')[1].replace('/', '');
+            const coverUrl = element.find('div.card-img-top img').attr('src');
+            
+            // 第二个匹配的 span 是发布日期
+            const releaseDate = element.find('div.d-flex.justify-content-between span.text-truncate').eq(1).text();
+
+            result.push({
                 id: id,
-                type: 'url', // ID 是从 URL 来的
+                type: 'url',
                 title: title,
                 posterPath: coverUrl,
-                backdropPath: coverUrl, // 列表页没有横向封面，暂时用同一个
+                backdropPath: coverUrl,
                 link: link,
                 releaseDate: releaseDate.trim(),
-                mediaType: 'movie' // 假设所有内容都是 movie 类型
-            };
+                mediaType: 'movie'
+            });
         });
         
         console.log(`Parsed ${result.length} items.`);
@@ -106,7 +107,6 @@ async function parseVideoList(url) {
  */
 async function getHotVideos(params = {}) {
     const page = params.page || 1;
-    // Jable TV 的热门影片分页URL结构为 /hot/page/2/
     const url = `https://jable.tv/hot/${page > 1 ? 'page/' + page + '/' : ''}`;
     return await parseVideoList(url);
 }
@@ -117,7 +117,6 @@ async function getHotVideos(params = {}) {
  */
 async function getLatestVideos(params = {}) {
     const page = params.page || 1;
-    // Jable TV 的最新上市影片分页URL结构为 /latest-updates/page/2/
     const url = `https://jable.tv/latest-updates/${page > 1 ? 'page/' + page + '/' : ''}`;
     return await parseVideoList(url);
 }
