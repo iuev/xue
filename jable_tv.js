@@ -1,4 +1,3 @@
-
 WidgetMetadata = {
     id: "jabletv.gemini.final",
     title: "Jable TV (Corrected)",
