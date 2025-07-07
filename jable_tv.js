@@ -5,7 +5,7 @@ var WidgetMetadata = {
     description: "一个用于浏览 Jable TV 的 ForwardWidget 模块。",
     author: "Gemini",
     site: "https://jable.tv/",
-    version: "1.0.2",
+    version: "1.1.0",
     requiredVersion: "0.0.1",
     detailCacheDuration: 600,
     modules: [
@@ -13,32 +13,26 @@ var WidgetMetadata = {
             title: "热门影片",
             description: "当前最热门的影片",
             requiresWebView: false,
-            functionName: "getHotVideos",
+            functionName: "loadPage",
             sectionMode: true,
             cacheDuration: 3600,
             params: [
-                {
-                    name: "page",
-                    title: "页码",
-                    type: "page",
-                    value: 1
-                }
+                { name: "url", type: "constant", value: "https://jable.tv/hot/" },
+                { name: "title", type: "constant", value: "热门影片" },
+                { name: "page", title: "页码", type: "page", value: 1 }
             ]
         },
         {
             title: "最新上市影片",
             description: "最新发布的影片",
             requiresWebView: false,
-            functionName: "getLatestVideos",
+            functionName: "loadPage",
             sectionMode: true,
             cacheDuration: 3600,
             params: [
-                {
-                    name: "page",
-                    title: "页码",
-                    type: "page",
-                    value: 1
-                }
+                { name: "url", type: "constant", value: "https://jable.tv/latest-updates/" },
+                { name: "title", type: "constant", value: "最新上市影片" },
+                { name: "page", title: "页码", type: "page", value: 1 }
             ]
         }
     ],
@@ -46,50 +40,29 @@ var WidgetMetadata = {
         title: "搜索",
         functionName: "search",
         params: [
-            {
-                name: "keyword",
-                title: "关键词",
-                type: "input"
-            },
-            {
-                name: "page",
-                title: "页码",
-                type: "page",
-                value: 1
-            }
+            { name: "keyword", title: "关键词", type: "input" },
+            { name: "page", title: "页码", type: "page", value: 1 }
         ]
     }
 };
 
+async function loadPage(params = {}) {
+    const page = params.page > 1 ? `page/${params.page}/` : '';
+    const url = `${params.url}${page}`;
+    const items = await parseVideoList(url);
+    return [{ 
+        title: params.title, 
+        childItems: items 
+    }];
+}
+
 async function search(params = {}) {
     const keyword = encodeURIComponent(params.keyword || "");
     const page = params.page || 1;
+    // Jable's search uses a `from` parameter for pagination, not a path like other pages.
     const url = `https://jable.tv/search/${keyword}/?from=${page}`;
-    const items = await parseVideoList(url);
-    // 搜索结果不需要 section 包装
-    return items;
-}
-
-async function getHotVideos(params = {}) {
-    const page = params.page || 1;
-    const url = `https://jable.tv/hot/${page > 1 ? 'page/' + page + '/' : ''}`;
-    const items = await parseVideoList(url);
-    // 当 sectionMode 为 true 时，返回一个包含 Section 对象的数组
-    return [{ 
-        title: "热门影片", 
-        childItems: items 
-    }];
-}
-
-async function getLatestVideos(params = {}) {
-    const page = params.page || 1;
-    const url = `https://jable.tv/latest-updates/${page > 1 ? 'page/' + page + '/' : ''}`;
-    const items = await parseVideoList(url);
-    // 当 sectionMode 为 true 时，返回一个包含 Section 对象的数组
-    return [{ 
-        title: "最新上市影片", 
-        childItems: items 
-    }];
+    // Search results are a flat list, not a section.
+    return await parseVideoList(url);
 }
 
 async function parseVideoList(url) {
@@ -108,7 +81,7 @@ async function parseVideoList(url) {
             const titleAnchor = element.find('h6.card-title a');
             const link = titleAnchor.attr('href');
             
-            if (!link) return;
+            if (!link || !link.includes('/videos/')) return;
 
             const id = link.split('/videos/')[1].replace('/', '');
             const title = titleAnchor.text();
