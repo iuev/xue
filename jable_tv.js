@@ -67,24 +67,32 @@ async function parseVideoListPage(url) {
         });
 
         if (!response || !response.data) {
+            console.error("获取页面数据失败或数据为空");
             throw new Error("获取页面数据失败");
         }
 
+        console.log("Response data length:", response.data.length);
+        // Log a snippet of the raw HTML to verify content
+        console.log("Raw HTML snippet (first 500 chars):", response.data.substring(0, 500));
+
         const $ = Widget.html.load(response.data);
+        console.log("HTML loaded successfully:", $ !== null);
+
         const videoElements = $('div.video-item');
 
         if (videoElements.length === 0) {
-            console.log("在页面上未找到视频项目");
+            console.log("在页面上未找到视频项目 (div.video-item)");
             return [];
         }
+        console.log("Number of video elements found:", videoElements.length);
 
         return videoElements.map((index, element) => {
             const $el = $(element);
             const link = $el.find('a').attr('href');
-            const cover = $el.find('a img').attr('src');
-            const title = $el.find('.card-body h6.title').text().trim();
-            const duration = $el.find('.card-body .duration').text().trim();
-            const info = $el.find('.card-body .card-info').text().trim();
+            const cover = $el.find('img').attr('data-src'); // Corrected to data-src
+            const title = $el.find('.detail h6.title').text().trim(); // Corrected path
+            const duration = $el.find('.absolute-bottom-right .label').text().trim(); // Corrected path
+            const info = $el.find('.detail p.sub-title').text().trim(); // Corrected path
 
             return {
                 id: link,
@@ -109,18 +117,18 @@ async function parseVideoListPage(url) {
  */
 async function getPopularVideos(params = {}) {
     const page = params.page || 1;
-    const url = `https://jable.tv/videos/?sort=hot&page=${page}`;
+    const url = `https://jable.tv/hot/?page=${page}`;
     return await parseVideoListPage(url);
 }
 
 /**
  * 获取最新上市影片
- * @param {Object} params 参数对象，包含 page
+ * @xue/.cache/uv/archive-v0/DCJEWGSFmsTNXl3XOyfxh/fastapi/param_functions.py {Object} params 参数对象，包含 page
  * @returns {Promise<Object[]>}
  */
 async function getLatestVideos(params = {}) {
     const page = params.page || 1;
-    const url = `https://jable.tv/videos/?sort=new&page=${page}`;
+    const url = `https://jable.tv/recently-updated/?page=${page}`;
     return await parseVideoListPage(url);
 }
 
