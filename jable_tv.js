@@ -1,10 +1,11 @@
+
 var WidgetMetadata = {
     id: "jable.tv",
     title: "Jable TV",
-    description: "Jable TV 的非官方 ForwardWidget 模块",
+    description: "一个用于浏览 Jable TV 的 ForwardWidget 模块。",
     author: "Gemini",
     site: "https://jable.tv/",
-    version: "1.0.1", // Incremented version
+    version: "1.0.2",
     requiredVersion: "0.0.1",
     detailCacheDuration: 600,
     modules: [
@@ -40,44 +41,78 @@ var WidgetMetadata = {
                 }
             ]
         }
-    ]
+    ],
+    search: {
+        title: "搜索",
+        functionName: "search",
+        params: [
+            {
+                name: "keyword",
+                title: "关键词",
+                type: "input"
+            },
+            {
+                name: "page",
+                title: "页码",
+                type: "page",
+                value: 1
+            }
+        ]
+    }
 };
 
-/**
- * 通用的视频列表解析函数
- * @param {string} url - 要抓取的页面URL
- * @returns {Promise<Array>} - 返回视频对象数组
- */
+async function search(params = {}) {
+    const keyword = encodeURIComponent(params.keyword || "");
+    const page = params.page || 1;
+    const url = `https://jable.tv/search/${keyword}/?from=${page}`;
+    const items = await parseVideoList(url);
+    // 搜索结果不需要 section 包装
+    return items;
+}
+
+async function getHotVideos(params = {}) {
+    const page = params.page || 1;
+    const url = `https://jable.tv/hot/${page > 1 ? 'page/' + page + '/' : ''}`;
+    const items = await parseVideoList(url);
+    // 当 sectionMode 为 true 时，返回一个包含 Section 对象的数组
+    return [{ 
+        title: "热门影片", 
+        childItems: items 
+    }];
+}
+
+async function getLatestVideos(params = {}) {
+    const page = params.page || 1;
+    const url = `https://jable.tv/latest-updates/${page > 1 ? 'page/' + page + '/' : ''}`;
+    const items = await parseVideoList(url);
+    // 当 sectionMode 为 true 时，返回一个包含 Section 对象的数组
+    return [{ 
+        title: "最新上市影片", 
+        childItems: items 
+    }];
+}
+
 async function parseVideoList(url) {
     try {
-        console.log(`Fetching URL: ${url}`);
         const response = await Widget.http.get(url, {
             headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             }
         });
 
-        // 使用 Widget.html.load 获取 cheerio 实例
         const $ = Widget.html.load(response.data);
         const result = [];
 
         $('div.card.h-100').each((i, el) => {
             const element = $(el);
             const titleAnchor = element.find('h6.card-title a');
-            
-            const title = titleAnchor.text();
             const link = titleAnchor.attr('href');
             
-            if (!link) {
-                console.log("Skipping card without a link.");
-                return; // continue to next iteration
-            }
+            if (!link) return;
 
-            // 从链接中提取唯一ID
             const id = link.split('/videos/')[1].replace('/', '');
+            const title = titleAnchor.text();
             const coverUrl = element.find('div.card-img-top img').attr('src');
-            
-            // 第二个匹配的 span 是发布日期
             const releaseDate = element.find('div.d-flex.justify-content-between span.text-truncate').eq(1).text();
 
             result.push({
@@ -92,31 +127,37 @@ async function parseVideoList(url) {
             });
         });
         
-        console.log(`Parsed ${result.length} items.`);
         return result;
 
     } catch (error) {
-        console.error("解析视频列表失败:", error);
-        throw new Error(`无法加载或解析页面: ${url}`);
+        console.error(`解析视频列表失败: ${url}`, error);
+        throw error;
     }
 }
 
-/**
- * 获取热门影片
- * @param {object} params - 包含 page 参数
- */
-async function getHotVideos(params = {}) {
-    const page = params.page || 1;
-    const url = `https://jable.tv/hot/${page > 1 ? 'page/' + page + '/' : ''}`;
-    return await parseVideoList(url);
-}
+async function loadDetail(link) {
+    try {
+        const response = await Widget.http.get(link, {
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "Referer": "https://jable.tv/"
+            },
+        });
 
-/**
- * 获取最新上市影片
- * @param {object} params - 包含 page 参数
- */
-async function getLatestVideos(params = {}) {
-    const page = params.page || 1;
-    const url = `https://jable.tv/latest-updates/${page > 1 ? 'page/' + page + '/' : ''}`;
-    return await parseVideoList(url);
+        const match = response.data.match(/var hlsUrl = '(.*?)';/);
+        if (!match || !match[1]) {
+            throw new Error("无法在页面中找到 hlsUrl");
+        }
+        const hlsUrl = match[1];
+
+        return {
+            videoUrl: hlsUrl,
+            customHeaders: {
+                "Referer": link
+            }
+        };
+    } catch (error) {
+        console.error(`加载详情页失败: ${link}`, error);
+        throw error;
+    }
 }
