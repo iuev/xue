@@ -4,7 +4,7 @@ WidgetMetadata = {
     description: "获取 Jable.TV 的视频内容",
     author: "ForwardWidget",
     site: "https://jable.tv",
-    version: "1.0.3",
+    version: "1.0.0",
     requiredVersion: "0.0.1",
     detailCacheDuration: 60,
     modules: [
@@ -134,7 +134,7 @@ async function parseVideoList(url, headers = {}) {
             throw new Error("获取页面数据失败");
         }
 
-        console.log("页面数据长度:", response.data.length);
+        console.log("响应数据长度:", response.data.length);
 
         // 解析HTML
         const $ = Widget.html.load(response.data);
@@ -145,6 +145,10 @@ async function parseVideoList(url, headers = {}) {
         // 查找视频项
         const videoItems = $(".video-img-box");
         console.log("找到视频项数量:", videoItems.length);
+        
+        if (videoItems.length === 0) {
+            console.log("未找到视频项，查看页面内容前500字符:", response.data.substring(0, 500));
+        }
 
         const results = [];
         
@@ -193,12 +197,11 @@ async function parseVideoList(url, headers = {}) {
                 
                 const videoItem = {
                     id: videoId,
-                    type: "url",  // 直接使用URL类型
+                    type: "link",  // 需要通过loadDetail获取播放链接
                     title: title,
                     posterPath: coverUrl,
                     backdropPath: coverUrl,
                     previewUrl: previewUrl, // 预览链接
-                    videoUrl: previewUrl || fullLink, // 优先使用预览链接作为播放链接
                     link: fullLink, // 详情页链接
                     duration: parseDuration(durationText),
                     durationText: durationText,
@@ -227,11 +230,23 @@ async function getHotVideos(params = {}) {
         const page = params.page || 1;
         const sortType = params.sort_type || "video_viewed_week";
         
-        let url = "https://jable.tv/hot/";
-        if (page > 1) {
-            url = `https://jable.tv/hot/${page}/`;
+        // 根据排序类型构建不同的URL
+        let baseUrl = "https://jable.tv/hot/";
+        
+        // 添加异步参数
+        let url = `${baseUrl}?mode=async&function=get_block&block_id=list_videos_common_videos_list`;
+        
+        // 添加排序参数
+        if (sortType !== "video_viewed_week") {
+            url += `&sort_by=${sortType}`;
         }
         
+        // 添加分页参数
+        if (page > 1) {
+            url += `&from=${page}`;
+        }
+        
+        console.log("热门视频URL:", url);
         return await parseVideoList(url);
     } catch (error) {
         console.error("获取热门视频失败:", error);
@@ -244,9 +259,9 @@ async function getLatestVideos(params = {}) {
     try {
         const page = params.page || 1;
         
-        let url = "https://jable.tv/latest-updates/";
+        let url = `https://jable.tv/latest-updates/?mode=async&function=get_block&block_id=list_videos_common_videos_list`;
         if (page > 1) {
-            url = `https://jable.tv/latest-updates/${page}/`;
+            url += `&from=${page}`;
         }
         
         return await parseVideoList(url);
@@ -270,9 +285,9 @@ async function searchVideos(params = {}) {
         const encodedKeyword = encodeURIComponent(keyword.trim());
         
         // 构建搜索URL
-        let url = `https://jable.tv/search/${encodedKeyword}/`;
+        let url = `https://jable.tv/search/${encodedKeyword}/?mode=async&function=get_block&block_id=list_videos_common_videos_list`;
         if (page > 1) {
-            url = `https://jable.tv/search/${encodedKeyword}/${page}/`;
+            url += `&from=${page}`;
         }
         
         console.log("搜索URL:", url);
@@ -284,18 +299,51 @@ async function searchVideos(params = {}) {
     }
 }
 
-// 加载视频详情（备用函数）
+// 加载视频详情
 async function loadDetail(link) {
     try {
-        console.log("loadDetail被调用，链接:", link);
+        console.log("获取视频播放链接:", link);
         
-        // 简化处理：直接返回链接让用户在浏览器中打开
+        const response = await Widget.http.get(link, {
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "Referer": "https://jable.tv/",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            }
+        });
+
+        if (!response || !response.data) {
+            throw new Error("获取页面失败");
+        }
+
+        // 提取HLS流媒体链接
+        const hlsMatches = response.data.match(/var hlsUrl = '(.*?)';/);
+        if (hlsMatches && hlsMatches[1]) {
+            const hlsUrl = hlsMatches[1];
+            console.log("找到HLS链接:", hlsUrl);
+            return {
+                videoUrl: hlsUrl
+            };
+        }
+
+        // 如果没找到HLS，尝试查找其他视频链接
+        const videoMatches = response.data.match(/videoUrl\s*[:=]\s*['"](https?:\/\/[^'"]+)['"]/);
+        if (videoMatches && videoMatches[1]) {
+            console.log("找到视频链接:", videoMatches[1]);
+            return {
+                videoUrl: videoMatches[1]
+            };
+        }
+
+        // 如果都没找到，返回原链接
+        console.log("未找到视频链接，返回原链接");
         return {
             videoUrl: link
         };
-        
+
     } catch (error) {
-        console.error("loadDetail失败:", error);
+        console.error("获取视频链接失败:", error);
         return {
             videoUrl: link
         };
