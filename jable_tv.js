@@ -4,7 +4,7 @@ WidgetMetadata = {
     description: "获取 Jable.TV 的视频内容",
     author: "ForwardWidget",
     site: "https://jable.tv",
-    version: "1.0.0",
+    version: "1.0.1",
     requiredVersion: "0.0.1",
     detailCacheDuration: 60,
     modules: [
