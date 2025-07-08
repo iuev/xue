@@ -118,7 +118,7 @@ function parseViewCount(viewText) {
 // 通用的视频列表解析函数
 async function parseVideoList(url, headers = {}) {
     try {
-        console.log("请求URL:", url);
+        console.log("🔄 开始请求:", url);
         
         const response = await Widget.http.get(url, {
             headers: {
@@ -130,11 +130,15 @@ async function parseVideoList(url, headers = {}) {
             }
         });
 
+        console.log("📡 响应状态:", response ? "成功" : "失败");
+        console.log("📏 响应数据长度:", response?.data?.length || 0);
+
         if (!response || !response.data) {
             throw new Error("获取页面数据失败");
         }
 
-        console.log("响应数据长度:", response.data.length);
+        // 输出前1000字符用于调试
+        console.log("📄 响应内容前1000字符:", response.data.substring(0, 1000));
 
         // 解析HTML
         const $ = Widget.html.load(response.data);
@@ -142,35 +146,80 @@ async function parseVideoList(url, headers = {}) {
             throw new Error("解析HTML失败");
         }
 
-        // 查找视频项
-        const videoItems = $(".video-img-box");
-        console.log("找到视频项数量:", videoItems.length);
-        
-        if (videoItems.length === 0) {
-            console.log("未找到视频项，查看页面内容前500字符:", response.data.substring(0, 500));
+        console.log("✅ HTML解析成功");
+
+        // 尝试多种选择器
+        const selectors = [
+            ".video-img-box",
+            ".img-box", 
+            ".cover-md",
+            "a[href*='/videos/']",
+            "[data-src*='contents/videos_screenshots']"
+        ];
+
+        let videoItems = null;
+        let usedSelector = "";
+
+        for (const selector of selectors) {
+            const items = $(selector);
+            console.log(`🔍 选择器 '${selector}' 找到 ${items.length} 个元素`);
+            if (items.length > 0) {
+                videoItems = items;
+                usedSelector = selector;
+                break;
+            }
         }
+
+        if (!videoItems || videoItems.length === 0) {
+            console.log("❌ 未找到任何视频项");
+            console.log("📋 页面所有class列表:", $('[class]').map((i, el) => $(el).attr('class')).get().slice(0, 20));
+            throw new Error("未找到视频项");
+        }
+
+        console.log(`🎯 使用选择器 '${usedSelector}' 找到 ${videoItems.length} 个视频项`);
 
         const results = [];
         
         videoItems.each((index, element) => {
             try {
                 const $item = $(element);
+                console.log(`📝 解析第 ${index + 1} 个视频项`);
                 
-                // 获取链接
-                const linkElement = $item.find(".img-box a").first();
-                const link = linkElement.attr("href");
-                if (!link) return;
+                // 根据不同选择器适配不同的解析方式
+                let linkElement, link, titleElement, title, imgElement;
+                
+                if (usedSelector === ".video-img-box") {
+                    // 标准的视频盒子结构
+                    linkElement = $item.find(".img-box a, a").first();
+                    titleElement = $item.find(".title a, h6 a").first();
+                    imgElement = $item.find(".img-box img, img").first();
+                } else if (usedSelector.includes("href")) {
+                    // 直接是链接元素
+                    linkElement = $item;
+                    titleElement = $item.find("img").attr("alt") ? $item : $item.siblings().find("a");
+                    imgElement = $item.find("img");
+                } else {
+                    // 其他情况，尝试通用方法
+                    linkElement = $item.find("a").first() || $item.closest("a") || $item;
+                    titleElement = $item.find("a[title], img[alt]").first();
+                    imgElement = $item.find("img").first() || $item;
+                }
+                
+                link = linkElement.attr("href");
+                title = titleElement.text().trim() || titleElement.attr("title") || imgElement.attr("alt") || "";
+                
+                console.log(`🔗 链接: ${link}`);
+                console.log(`📝 标题: ${title}`);
+                
+                if (!link || !link.includes('/videos/')) {
+                    console.log(`⚠️ 跳过无效项: 链接=${link}`);
+                    return;
+                }
                 
                 // 构建完整URL
                 const fullLink = link.startsWith('http') ? link : `https://jable.tv${link}`;
                 
-                // 获取标题
-                const titleElement = $item.find(".title a").first();
-                const title = titleElement.text().trim();
-                if (!title) return;
-                
                 // 获取封面图片
-                const imgElement = $item.find(".img-box img").first();
                 let coverUrl = imgElement.attr("data-src") || imgElement.attr("src");
                 if (coverUrl && !coverUrl.startsWith('http')) {
                     coverUrl = `https://assets-cdn.jable.tv${coverUrl}`;
@@ -183,13 +232,8 @@ async function parseVideoList(url, headers = {}) {
                 }
                 
                 // 获取时长
-                const durationElement = $item.find(".label").first();
+                const durationElement = $item.find(".label, .duration").first();
                 const durationText = durationElement.text().trim();
-                
-                // 获取观看次数和收藏数
-                const subTitle = $item.find(".sub-title").text();
-                const viewMatch = subTitle.match(/(\d[\d,\s]*)/);
-                const viewCount = viewMatch ? parseViewCount(viewMatch[1]) : 0;
                 
                 // 提取视频ID
                 const urlMatch = link.match(/\/videos\/([^\/]+)\//);
@@ -209,18 +253,32 @@ async function parseVideoList(url, headers = {}) {
                     mediaType: "movie"
                 };
 
+                console.log(`✅ 成功解析视频: ${title.substring(0, 50)}...`);
                 results.push(videoItem);
             } catch (itemError) {
-                console.error("解析视频项失败:", itemError);
+                console.error("❌ 解析视频项失败:", itemError);
             }
         });
 
-        console.log("成功解析视频数量:", results.length);
+        console.log(`🎉 解析完成! 共获取 ${results.length} 个视频`);
+        
+        if (results.length > 0) {
+            console.log("📊 第一个视频示例:", {
+                id: results[0].id,
+                title: results[0].title?.substring(0, 50) + "...",
+                link: results[0].link,
+                posterPath: results[0].posterPath?.substring(0, 50) + "..."
+            });
+        }
+        
         return results;
         
     } catch (error) {
-        console.error("获取视频列表失败:", error);
-        throw error;
+        console.error("❌ 获取视频列表失败:", error);
+        console.error("📋 错误详情:", error.message);
+        
+        // 返回空数组以避免应用崩溃
+        return [];
     }
 }
 
@@ -230,14 +288,29 @@ async function getHotVideos(params = {}) {
         const page = params.page || 1;
         const sortType = params.sort_type || "video_viewed_week";
         
-        // 根据排序类型构建不同的URL
-        let baseUrl = "https://jable.tv/hot/";
+        console.log("🚀 开始获取热门视频", { page, sortType });
         
-        // 添加异步参数
+        // 首先尝试普通页面（用于测试和调试）
+        if (page === 1) {
+            console.log("🧪 尝试普通页面作为备选方案");
+            try {
+                const normalPageUrl = "https://jable.tv/hot/";
+                const normalResult = await parseVideoList(normalPageUrl);
+                if (normalResult && normalResult.length > 0) {
+                    console.log("✅ 普通页面获取成功，返回数据");
+                    return normalResult;
+                }
+            } catch (normalError) {
+                console.log("⚠️ 普通页面失败，尝试API:", normalError.message);
+            }
+        }
+        
+        // 使用异步API
+        let baseUrl = "https://jable.tv/hot/";
         let url = `${baseUrl}?mode=async&function=get_block&block_id=list_videos_common_videos_list`;
         
         // 添加排序参数
-        if (sortType !== "video_viewed_week") {
+        if (sortType && sortType !== "video_viewed_week") {
             url += `&sort_by=${sortType}`;
         }
         
@@ -246,11 +319,13 @@ async function getHotVideos(params = {}) {
             url += `&from=${page}`;
         }
         
-        console.log("热门视频URL:", url);
+        console.log("🔗 API URL:", url);
         return await parseVideoList(url);
     } catch (error) {
-        console.error("获取热门视频失败:", error);
-        throw error;
+        console.error("❌ 获取热门视频失败:", error);
+        console.error("📋 错误详情:", error.message);
+        // 返回空数组以避免应用崩溃
+        return [];
     }
 }
 
@@ -258,16 +333,34 @@ async function getHotVideos(params = {}) {
 async function getLatestVideos(params = {}) {
     try {
         const page = params.page || 1;
+        console.log("🆕 开始获取最新视频", { page });
         
+        // 首先尝试普通页面
+        if (page === 1) {
+            try {
+                const normalPageUrl = "https://jable.tv/latest-updates/";
+                const normalResult = await parseVideoList(normalPageUrl);
+                if (normalResult && normalResult.length > 0) {
+                    console.log("✅ 最新视频普通页面获取成功");
+                    return normalResult;
+                }
+            } catch (normalError) {
+                console.log("⚠️ 最新视频普通页面失败，尝试API:", normalError.message);
+            }
+        }
+        
+        // 使用异步API
         let url = `https://jable.tv/latest-updates/?mode=async&function=get_block&block_id=list_videos_common_videos_list`;
         if (page > 1) {
             url += `&from=${page}`;
         }
         
+        console.log("🔗 最新视频API URL:", url);
         return await parseVideoList(url);
     } catch (error) {
-        console.error("获取最新视频失败:", error);
-        throw error;
+        console.error("❌ 获取最新视频失败:", error);
+        // 返回空数组而不是抛出错误，确保应用不会崩溃
+        return [];
     }
 }
 
@@ -290,12 +383,14 @@ async function searchVideos(params = {}) {
             url += `&from=${page}`;
         }
         
-        console.log("搜索URL:", url);
+        console.log("🔍 搜索URL:", url);
         
         return await parseVideoList(url);
     } catch (error) {
-        console.error("搜索视频失败:", error);
-        throw error;
+        console.error("❌ 搜索视频失败:", error);
+        console.error("📋 错误详情:", error.message);
+        // 返回空数组以避免应用崩溃
+        return [];
     }
 }
 
