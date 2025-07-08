@@ -4,7 +4,7 @@ WidgetMetadata = {
     description: "获取 Jable.TV 的视频内容",
     author: "ForwardWidget",
     site: "https://jable.tv",
-    version: "1.0.1",
+    version: "1.0.3",
     requiredVersion: "0.0.1",
     detailCacheDuration: 60,
     modules: [
@@ -193,12 +193,13 @@ async function parseVideoList(url, headers = {}) {
                 
                 const videoItem = {
                     id: videoId,
-                    type: "link",  // 改为link类型，需要通过loadDetail获取真实播放链接
+                    type: "url",  // 直接使用URL类型
                     title: title,
                     posterPath: coverUrl,
                     backdropPath: coverUrl,
-                    previewUrl: previewUrl, // 添加预览链接
-                    link: fullLink,
+                    previewUrl: previewUrl, // 预览链接
+                    videoUrl: previewUrl || fullLink, // 优先使用预览链接作为播放链接
+                    link: fullLink, // 详情页链接
                     duration: parseDuration(durationText),
                     durationText: durationText,
                     description: title,
@@ -283,131 +284,20 @@ async function searchVideos(params = {}) {
     }
 }
 
-// 加载视频详情（如果需要播放链接）
+// 加载视频详情（备用函数）
 async function loadDetail(link) {
     try {
-        console.log("加载视频详情:", link);
+        console.log("loadDetail被调用，链接:", link);
         
-        const response = await Widget.http.get(link, {
-            headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                "Referer": "https://jable.tv/",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-                "Cache-Control": "no-cache",
-            }
-        });
-
-        if (!response || !response.data) {
-            throw new Error("获取视频详情失败");
-        }
-
-        console.log("视频详情页面数据长度:", response.data.length);
-
-        const $ = Widget.html.load(response.data);
-        if (!$) {
-            throw new Error("解析视频详情页面失败");
-        }
-
-        let videoUrl = "";
-        
-        // 方法1: 查找hlsUrl配置
-        try {
-            const scriptTexts = $("script").map((i, el) => $(el).html()).get();
-            for (const scriptText of scriptTexts) {
-                if (scriptText && scriptText.includes('hlsUrl')) {
-                    // 查找hlsUrl配置
-                    const hlsMatch = scriptText.match(/hlsUrl\s*[:=]\s*['"](https?:\/\/[^'"]+\.m3u8[^'"]*)['"]/);
-                    if (hlsMatch) {
-                        videoUrl = hlsMatch[1];
-                        console.log("找到HLS链接:", videoUrl);
-                        break;
-                    }
-                }
-            }
-        } catch (e) {
-            console.log("方法1失败:", e);
-        }
-        
-        // 方法2: 查找其他配置变量
-        if (!videoUrl) {
-            try {
-                const scriptTexts = $("script").map((i, el) => $(el).html()).get();
-                for (const scriptText of scriptTexts) {
-                    if (scriptText) {
-                        // 查找可能的视频配置
-                        const patterns = [
-                            /videoUrl\s*[:=]\s*['"](https?:\/\/[^'"]+)['"]/,
-                            /src\s*[:=]\s*['"](https?:\/\/[^'"]+\.mp4[^'"]*)['"]/,
-                            /file\s*[:=]\s*['"](https?:\/\/[^'"]+)['"]/,
-                            /video\s*[:=]\s*['"](https?:\/\/[^'"]+)['"]/,
-                            /url\s*[:=]\s*['"](https?:\/\/[^'"]+\.m3u8[^'"]*)['"]/
-                        ];
-                        
-                        for (const pattern of patterns) {
-                            const match = scriptText.match(pattern);
-                            if (match) {
-                                videoUrl = match[1];
-                                console.log("找到视频链接:", videoUrl);
-                                break;
-                            }
-                        }
-                        if (videoUrl) break;
-                    }
-                }
-            } catch (e) {
-                console.log("方法2失败:", e);
-            }
-        }
-        
-        // 方法3: 查找video标签
-        if (!videoUrl) {
-            try {
-                const videoElement = $("video");
-                if (videoElement.length > 0) {
-                    videoUrl = videoElement.attr("src") || 
-                              videoElement.find("source").attr("src") ||
-                              videoElement.attr("data-src");
-                    if (videoUrl) {
-                        console.log("从video标签找到链接:", videoUrl);
-                    }
-                }
-            } catch (e) {
-                console.log("方法3失败:", e);
-            }
-        }
-        
-        // 方法4: 查找iframe中的视频
-        if (!videoUrl) {
-            try {
-                const iframes = $("iframe");
-                for (let i = 0; i < iframes.length; i++) {
-                    const src = $(iframes[i]).attr("src");
-                    if (src && (src.includes("player") || src.includes("video"))) {
-                        videoUrl = src;
-                        console.log("从iframe找到链接:", videoUrl);
-                        break;
-                    }
-                }
-            } catch (e) {
-                console.log("方法4失败:", e);
-            }
-        }
-        
-        // 如果所有方法都失败，尝试返回详情页面链接
-        if (!videoUrl) {
-            console.log("未找到视频链接，返回详情页面链接");
-            videoUrl = link;
-        }
-
+        // 简化处理：直接返回链接让用户在浏览器中打开
         return {
-            videoUrl: videoUrl
+            videoUrl: link
         };
         
     } catch (error) {
-        console.error("加载视频详情失败:", error);
+        console.error("loadDetail失败:", error);
         return {
-            videoUrl: link // 出错时返回原链接
+            videoUrl: link
         };
     }
 } 
