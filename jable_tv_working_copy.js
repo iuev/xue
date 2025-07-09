@@ -4,7 +4,7 @@ WidgetMetadata = {
     description: "获取低端影视的电影和电视剧内容",
     author: "ForwardWidget",
     site: "https://ddys.mov",
-    version: "1.0.0",
+    version: "1.0.1",
     requiredVersion: "0.0.1",
     detailCacheDuration: 60,
     modules: [
@@ -531,180 +531,103 @@ async function loadDetail(link) {
 
         let videoUrl = "";
 
-        // 方法1: 查找加密或编码的播放配置
-        console.log("🔍 方法1: 查找播放器配置...");
-        const scriptTags = $("script");
-        scriptTags.each((i, script) => {
-            const scriptContent = $(script).html();
-            if (scriptContent) {
-                // 查找可能的播放器初始化
-                const configPatterns = [
-                    /player\.ready\(function\(\)\s*{\s*.*?src['"]*:\s*['"](.*?)['"]/s,
-                    /player\.src\(\s*['"](.*?)['"]\s*\)/,
-                    /video\s*=\s*videojs.*?src['"]*:\s*['"](.*?)['"]/s,
-                    /setupVideo.*?['"](.*?\.m3u8.*?)['"]/,
-                    /playUrl\s*[:=]\s*['"](.*?)['"]/,
-                    /videoSrc\s*[:=]\s*['"](.*?)['"]/,
-                    /hlsSource\s*[:=]\s*['"](.*?)['"]/,
-                    /"file"\s*:\s*"(.*?)"/,
-                    /"url"\s*:\s*"(.*?)"/
-                ];
-
-                for (const pattern of configPatterns) {
-                    const match = scriptContent.match(pattern);
-                    if (match && match[1]) {
-                        videoUrl = match[1];
-                        console.log("🎯 找到播放配置:", videoUrl.substring(0, 100) + "...");
-                        return false; // 跳出each循环
-                    }
-                }
-            }
-        });
-
-        // 方法2: 查找可能的AJAX加载播放链接的endpoint
-        if (!videoUrl) {
-            console.log("🔍 方法2: 查找AJAX播放接口...");
-            const ajaxPatterns = [
-                /ajax.*?url['"]*:\s*['"](.*?play.*?)['"]/,
-                /getPlayUrl.*?['"](.*?)['"]/,
-                /videoAjax.*?['"](.*?)['"]/,
-                /loadVideo.*?['"](.*?)['"]/
-            ];
-
-            for (const pattern of ajaxPatterns) {
-                const match = htmlContent.match(pattern);
-                if (match && match[1]) {
-                    const ajaxUrl = match[1].startsWith('http') ? match[1] : `https://ddys.mov${match[1]}`;
-                    console.log("🎯 找到AJAX接口:", ajaxUrl);
+        // 方法1: 查找WordPress播放列表配置（基于真实页面结构）
+        console.log("🔍 方法1: 查找wp-playlist配置...");
+        const playlistScript = $("script.wp-playlist-script[type='application/json']");
+        if (playlistScript.length > 0) {
+            try {
+                const playlistConfig = JSON.parse(playlistScript.html());
+                console.log("📋 找到播放列表配置:", playlistConfig);
+                
+                if (playlistConfig.tracks && playlistConfig.tracks.length > 0) {
+                    const track = playlistConfig.tracks[0];
+                    console.log("🎵 播放轨道信息:", track);
                     
-                    try {
-                        const ajaxResponse = await makeRequest(ajaxUrl);
-                        const ajaxData = JSON.parse(ajaxResponse);
-                        if (ajaxData.url || ajaxData.src || ajaxData.video_url) {
-                            videoUrl = ajaxData.url || ajaxData.src || ajaxData.video_url;
-                            console.log("🎯 AJAX获取到播放链接:", videoUrl);
+                    // 尝试多个可能的src字段
+                    const possibleSrcs = [
+                        track.src0,    // 主要视频路径
+                        track.src3,    // 备用路径
+                        track.src,     // 标准src
+                        track.file     // 可能的file字段
+                    ];
+                    
+                    for (const src of possibleSrcs) {
+                        if (src && src !== "javascript:;" && src.includes('.mp4')) {
+                            videoUrl = src;
+                            console.log("🎯 从播放列表获取视频路径:", videoUrl);
+                            
+                            // 检查是否需要端口号
+                            if (track.portn && !videoUrl.includes(':' + track.portn)) {
+                                // 构建完整URL，包含端口号
+                                if (videoUrl.startsWith('/')) {
+                                    videoUrl = `https://ddys.mov:${track.portn}${videoUrl}`;
+                                }
+                            }
                             break;
                         }
-                    } catch (e) {
-                        console.log("⚠️ AJAX请求失败:", e.message);
                     }
-                }
-            }
-        }
-
-        // 方法3: 查找iframe播放器并尝试获取其内容
-        if (!videoUrl) {
-            console.log("🔍 方法3: 查找iframe播放器...");
-            const iframes = $("iframe");
-            for (let i = 0; i < iframes.length; i++) {
-                const src = $(iframes[i]).attr("src");
-                if (src && (src.includes("player") || src.includes("play") || src.includes("video"))) {
-                    const iframeSrc = src.startsWith('http') ? src : `https://ddys.mov${src}`;
-                    console.log("🎯 找到iframe播放器:", iframeSrc);
                     
-                    try {
-                        const iframeContent = await makeRequest(iframeSrc);
-                        const iframePatterns = [
-                            /"file"\s*:\s*"(.*?)"/,
-                            /"url"\s*:\s*"(.*?)"/,
-                            /src\s*:\s*['"](.*?)['"]/,
-                            /source\s*:\s*['"](.*?)['"]/
-                        ];
-                        
-                        for (const pattern of iframePatterns) {
-                            const match = iframeContent.match(pattern);
-                            if (match && match[1]) {
-                                videoUrl = match[1];
-                                console.log("🎯 iframe中找到播放链接:", videoUrl);
-                                break;
-                            }
+                    // 如果有加密字段src2，可能需要解密处理
+                    if (!videoUrl && track.src2) {
+                        console.log("🔐 发现加密字段src2:", track.src2);
+                        // 这里可能需要额外的解密逻辑
+                        // 暂时尝试作为路径使用
+                        if (track.src2.length > 10) {
+                            videoUrl = `/decrypt/${track.src2}`;
                         }
-                        if (videoUrl) break;
-                    } catch (e) {
-                        console.log("⚠️ iframe内容获取失败:", e.message);
                     }
+                }
+            } catch (e) {
+                console.log("❌ 播放列表JSON解析失败:", e.message);
+            }
+        }
+
+        // 方法2: 查找Video.js播放器配置
+        if (!videoUrl) {
+            console.log("🔍 方法2: 查找Video.js配置...");
+            const scriptTags = $("script");
+            scriptTags.each((i, script) => {
+                const scriptContent = $(script).html();
+                if (scriptContent) {
+                    // 查找播放器初始化配置
+                    const configPatterns = [
+                        /player\.src\(\s*['"](.*?)['"]\s*\)/,
+                        /videojs.*?src['"]*:\s*['"](.*?)['"]/s,
+                        /"file"\s*:\s*"(.*?)"/,
+                        /"url"\s*:\s*"(.*?)"/,
+                        /src0['"]*:\s*['"](.*?)['"]/,
+                        /src3['"]*:\s*['"](.*?)['"]/
+                    ];
+
+                    for (const pattern of configPatterns) {
+                        const match = scriptContent.match(pattern);
+                        if (match && match[1] && match[1] !== "javascript:;") {
+                            videoUrl = match[1];
+                            console.log("🎯 从script找到播放配置:", videoUrl);
+                            return false; // 跳出each循环
+                        }
+                    }
+                }
+            });
+        }
+
+        // 方法3: 查找video标签的直接src属性
+        if (!videoUrl) {
+            console.log("🔍 方法3: 查找video标签...");
+            const videoTag = $("#vjsp, .video-js, video");
+            if (videoTag.length > 0) {
+                const src = videoTag.attr("src") || videoTag.attr("data-src");
+                if (src && src !== "javascript:;") {
+                    videoUrl = src;
+                    console.log("🎯 从video标签获取src:", videoUrl);
                 }
             }
         }
 
-        // 方法4: 查找页面中可能的Base64编码或其他编码的播放链接
-        if (!videoUrl) {
-            console.log("🔍 方法4: 查找编码播放链接...");
-            const encodedPatterns = [
-                /atob\(['"`](.*?)['"`]\)/,  // Base64解码
-                /decodeURIComponent\(['"`](.*?)['"`]\)/,  // URL解码
-                /decrypt.*?['"`](.*?)['"`]/,  // 可能的解密函数
-            ];
 
-            for (const pattern of encodedPatterns) {
-                const match = htmlContent.match(pattern);
-                if (match && match[1]) {
-                    try {
-                        // 尝试Base64解码
-                        const decoded = atob ? atob(match[1]) : match[1];
-                        if (decoded && (decoded.includes('.m3u8') || decoded.includes('.mp4'))) {
-                            videoUrl = decoded;
-                            console.log("🎯 解码后找到播放链接:", videoUrl);
-                            break;
-                        }
-                    } catch (e) {
-                        console.log("⚠️ 解码失败:", e.message);
-                    }
-                }
-            }
-        }
-
-        // 方法5: 尝试常见的播放接口路径
-        if (!videoUrl) {
-            console.log("🔍 方法5: 尝试常见播放接口...");
-            
-            // 从URL中提取文章ID或slug
-            const urlMatch = link.match(/\/([^\/]+)\/?$/);
-            const articleId = urlMatch ? urlMatch[1] : "";
-            
-            if (articleId) {
-                const commonEndpoints = [
-                    `/wp-json/wp/v2/posts/${articleId}`,
-                    `/api/video/${articleId}`,
-                    `/play/${articleId}`,
-                    `/video/${articleId}`,
-                    `${link}?action=play`,
-                    `${link}play/`
-                ];
-
-                for (const endpoint of commonEndpoints) {
-                    try {
-                        const fullUrl = endpoint.startsWith('http') ? endpoint : `https://ddys.mov${endpoint}`;
-                        console.log("🔗 尝试接口:", fullUrl);
-                        
-                        const response = await makeRequest(fullUrl);
-                        
-                        // 尝试JSON解析
-                        try {
-                            const data = JSON.parse(response);
-                            if (data.video_url || data.play_url || data.url || data.src) {
-                                videoUrl = data.video_url || data.play_url || data.url || data.src;
-                                console.log("🎯 API接口找到播放链接:", videoUrl);
-                                break;
-                            }
-                        } catch (e) {
-                            // 可能是HTML响应，查找其中的播放链接
-                            const linkMatch = response.match(/(?:src|url)['"`:\s]*['"`]([^'"`\s]+\.(?:m3u8|mp4)[^'"`\s]*)/);
-                            if (linkMatch && linkMatch[1]) {
-                                videoUrl = linkMatch[1];
-                                console.log("🎯 HTML响应中找到播放链接:", videoUrl);
-                                break;
-                            }
-                        }
-                    } catch (e) {
-                        console.log(`⚠️ 接口 ${endpoint} 失败:`, e.message);
-                    }
-                }
-            }
-        }
 
         if (!videoUrl) {
-            console.log("❌ 所有方法都未找到播放链接");
+            console.log("❌ 未找到播放链接");
             console.log("📄 返回详情页面供用户浏览器打开");
             return {
                 videoUrl: link,
@@ -712,11 +635,15 @@ async function loadDetail(link) {
             };
         }
 
-        // 处理相对URL
+        console.log("🔗 原始视频路径:", videoUrl);
+
+        // 处理相对URL（根据真实页面结构）
         if (!videoUrl.startsWith('http')) {
             if (videoUrl.startsWith('//')) {
                 videoUrl = `https:${videoUrl}`;
             } else if (videoUrl.startsWith('/')) {
+                // 根据真实页面，视频路径如 "/v/movie/Ballerina.2025.mp4"
+                // 需要构建完整的播放URL
                 videoUrl = `https://ddys.mov${videoUrl}`;
             } else {
                 videoUrl = `https://ddys.mov/${videoUrl}`;
@@ -734,7 +661,8 @@ async function loadDetail(link) {
                 "Referer": link,
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
                 "Accept": "*/*",
-                "Origin": "https://ddys.mov"
+                "Origin": "https://ddys.mov",
+                "X-Requested-With": "XMLHttpRequest"
             }
         };
 
