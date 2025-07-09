@@ -518,7 +518,7 @@ async function searchContent(params = {}) {
 // 加载详情和播放链接
 async function loadDetail(link) {
     try {
-        console.log("🎬 获取播放链接:", link);
+        console.log("🎬 开始获取播放链接:", link);
 
         const htmlContent = await makeRequest(link);
         const $ = Widget.html.load(htmlContent);
@@ -527,95 +527,188 @@ async function loadDetail(link) {
             throw new Error("详情页解析失败");
         }
 
-        // 查找播放器容器
+        console.log("✅ 详情页面加载成功，页面长度:", htmlContent.length);
+
         let videoUrl = "";
 
-        // 方法1: 查找Video.js播放器配置（根据HTML中的video.js引用）
-        const videoPatterns = [
-            /var\s+player_data\s*=\s*({.*?});/s,
-            /video\.src\(\s*['"](.*?)['"]\s*\)/,
-            /player\.src\(\s*['"](.*?)['"]\s*\)/,
-            /"src"\s*:\s*"(.*?)"/,
-            /hlsUrl\s*=\s*['"](.*?)['"]/,
-            /videoUrl\s*=\s*['"](.*?)['"]/
-        ];
+        // 方法1: 查找加密或编码的播放配置
+        console.log("🔍 方法1: 查找播放器配置...");
+        const scriptTags = $("script");
+        scriptTags.each((i, script) => {
+            const scriptContent = $(script).html();
+            if (scriptContent) {
+                // 查找可能的播放器初始化
+                const configPatterns = [
+                    /player\.ready\(function\(\)\s*{\s*.*?src['"]*:\s*['"](.*?)['"]/s,
+                    /player\.src\(\s*['"](.*?)['"]\s*\)/,
+                    /video\s*=\s*videojs.*?src['"]*:\s*['"](.*?)['"]/s,
+                    /setupVideo.*?['"](.*?\.m3u8.*?)['"]/,
+                    /playUrl\s*[:=]\s*['"](.*?)['"]/,
+                    /videoSrc\s*[:=]\s*['"](.*?)['"]/,
+                    /hlsSource\s*[:=]\s*['"](.*?)['"]/,
+                    /"file"\s*:\s*"(.*?)"/,
+                    /"url"\s*:\s*"(.*?)"/
+                ];
 
-        for (const pattern of videoPatterns) {
-            const match = htmlContent.match(pattern);
-            if (match) {
-                if (pattern.source.includes('player_data')) {
-                    // 解析JSON配置
+                for (const pattern of configPatterns) {
+                    const match = scriptContent.match(pattern);
+                    if (match && match[1]) {
+                        videoUrl = match[1];
+                        console.log("🎯 找到播放配置:", videoUrl.substring(0, 100) + "...");
+                        return false; // 跳出each循环
+                    }
+                }
+            }
+        });
+
+        // 方法2: 查找可能的AJAX加载播放链接的endpoint
+        if (!videoUrl) {
+            console.log("🔍 方法2: 查找AJAX播放接口...");
+            const ajaxPatterns = [
+                /ajax.*?url['"]*:\s*['"](.*?play.*?)['"]/,
+                /getPlayUrl.*?['"](.*?)['"]/,
+                /videoAjax.*?['"](.*?)['"]/,
+                /loadVideo.*?['"](.*?)['"]/
+            ];
+
+            for (const pattern of ajaxPatterns) {
+                const match = htmlContent.match(pattern);
+                if (match && match[1]) {
+                    const ajaxUrl = match[1].startsWith('http') ? match[1] : `https://ddys.mov${match[1]}`;
+                    console.log("🎯 找到AJAX接口:", ajaxUrl);
+                    
                     try {
-                        const configStr = match[1];
-                        const config = JSON.parse(configStr);
-                        if (config.src) {
-                            videoUrl = config.src;
-                        } else if (config.sources && config.sources[0]) {
-                            videoUrl = config.sources[0].src;
+                        const ajaxResponse = await makeRequest(ajaxUrl);
+                        const ajaxData = JSON.parse(ajaxResponse);
+                        if (ajaxData.url || ajaxData.src || ajaxData.video_url) {
+                            videoUrl = ajaxData.url || ajaxData.src || ajaxData.video_url;
+                            console.log("🎯 AJAX获取到播放链接:", videoUrl);
+                            break;
                         }
                     } catch (e) {
-                        continue;
+                        console.log("⚠️ AJAX请求失败:", e.message);
                     }
-                } else if (match[1]) {
-                    videoUrl = match[1];
-                }
-                
-                if (videoUrl) {
-                    console.log("🎯 找到视频配置:", videoUrl);
-                    break;
                 }
             }
         }
 
-        // 方法2: 查找iframe播放器
+        // 方法3: 查找iframe播放器并尝试获取其内容
         if (!videoUrl) {
+            console.log("🔍 方法3: 查找iframe播放器...");
             const iframes = $("iframe");
-            iframes.each((i, iframe) => {
-                const src = $(iframe).attr("src");
+            for (let i = 0; i < iframes.length; i++) {
+                const src = $(iframes[i]).attr("src");
                 if (src && (src.includes("player") || src.includes("play") || src.includes("video"))) {
-                    videoUrl = src.startsWith('http') ? src : `https://ddys.mov${src}`;
-                    console.log("🎯 找到iframe播放器:", videoUrl);
-                    return false; // 跳出循环
-                }
-            });
-        }
-
-        // 方法3: 查找Video.js播放器容器
-        if (!videoUrl) {
-            const videoContainer = $("#vjsp, .video-js, [data-setup]");
-            if (videoContainer.length > 0) {
-                const dataSetup = videoContainer.attr("data-setup");
-                if (dataSetup) {
+                    const iframeSrc = src.startsWith('http') ? src : `https://ddys.mov${src}`;
+                    console.log("🎯 找到iframe播放器:", iframeSrc);
+                    
                     try {
-                        const setup = JSON.parse(dataSetup);
-                        if (setup.sources && setup.sources[0]) {
-                            videoUrl = setup.sources[0].src;
-                            console.log("🎯 找到data-setup配置:", videoUrl);
+                        const iframeContent = await makeRequest(iframeSrc);
+                        const iframePatterns = [
+                            /"file"\s*:\s*"(.*?)"/,
+                            /"url"\s*:\s*"(.*?)"/,
+                            /src\s*:\s*['"](.*?)['"]/,
+                            /source\s*:\s*['"](.*?)['"]/
+                        ];
+                        
+                        for (const pattern of iframePatterns) {
+                            const match = iframeContent.match(pattern);
+                            if (match && match[1]) {
+                                videoUrl = match[1];
+                                console.log("🎯 iframe中找到播放链接:", videoUrl);
+                                break;
+                            }
                         }
+                        if (videoUrl) break;
                     } catch (e) {
-                        // 忽略JSON解析错误
+                        console.log("⚠️ iframe内容获取失败:", e.message);
                     }
                 }
             }
         }
 
-        // 方法4: 查找页面中的播放链接按钮或数据
+        // 方法4: 查找页面中可能的Base64编码或其他编码的播放链接
         if (!videoUrl) {
-            const playElements = $("[data-src], [data-url], .play-btn");
-            playElements.each((i, el) => {
-                const url = $(el).attr("data-src") || $(el).attr("data-url") || $(el).attr("href");
-                if (url && (url.includes(".m3u8") || url.includes(".mp4") || url.includes("play"))) {
-                    videoUrl = url;
-                    console.log("🎯 找到播放链接:", videoUrl);
-                    return false;
+            console.log("🔍 方法4: 查找编码播放链接...");
+            const encodedPatterns = [
+                /atob\(['"`](.*?)['"`]\)/,  // Base64解码
+                /decodeURIComponent\(['"`](.*?)['"`]\)/,  // URL解码
+                /decrypt.*?['"`](.*?)['"`]/,  // 可能的解密函数
+            ];
+
+            for (const pattern of encodedPatterns) {
+                const match = htmlContent.match(pattern);
+                if (match && match[1]) {
+                    try {
+                        // 尝试Base64解码
+                        const decoded = atob ? atob(match[1]) : match[1];
+                        if (decoded && (decoded.includes('.m3u8') || decoded.includes('.mp4'))) {
+                            videoUrl = decoded;
+                            console.log("🎯 解码后找到播放链接:", videoUrl);
+                            break;
+                        }
+                    } catch (e) {
+                        console.log("⚠️ 解码失败:", e.message);
+                    }
                 }
-            });
+            }
+        }
+
+        // 方法5: 尝试常见的播放接口路径
+        if (!videoUrl) {
+            console.log("🔍 方法5: 尝试常见播放接口...");
+            
+            // 从URL中提取文章ID或slug
+            const urlMatch = link.match(/\/([^\/]+)\/?$/);
+            const articleId = urlMatch ? urlMatch[1] : "";
+            
+            if (articleId) {
+                const commonEndpoints = [
+                    `/wp-json/wp/v2/posts/${articleId}`,
+                    `/api/video/${articleId}`,
+                    `/play/${articleId}`,
+                    `/video/${articleId}`,
+                    `${link}?action=play`,
+                    `${link}play/`
+                ];
+
+                for (const endpoint of commonEndpoints) {
+                    try {
+                        const fullUrl = endpoint.startsWith('http') ? endpoint : `https://ddys.mov${endpoint}`;
+                        console.log("🔗 尝试接口:", fullUrl);
+                        
+                        const response = await makeRequest(fullUrl);
+                        
+                        // 尝试JSON解析
+                        try {
+                            const data = JSON.parse(response);
+                            if (data.video_url || data.play_url || data.url || data.src) {
+                                videoUrl = data.video_url || data.play_url || data.url || data.src;
+                                console.log("🎯 API接口找到播放链接:", videoUrl);
+                                break;
+                            }
+                        } catch (e) {
+                            // 可能是HTML响应，查找其中的播放链接
+                            const linkMatch = response.match(/(?:src|url)['"`:\s]*['"`]([^'"`\s]+\.(?:m3u8|mp4)[^'"`\s]*)/);
+                            if (linkMatch && linkMatch[1]) {
+                                videoUrl = linkMatch[1];
+                                console.log("🎯 HTML响应中找到播放链接:", videoUrl);
+                                break;
+                            }
+                        }
+                    } catch (e) {
+                        console.log(`⚠️ 接口 ${endpoint} 失败:`, e.message);
+                    }
+                }
+            }
         }
 
         if (!videoUrl) {
-            console.log("❌ 未找到视频链接，返回详情页链接");
+            console.log("❌ 所有方法都未找到播放链接");
+            console.log("📄 返回详情页面供用户浏览器打开");
             return {
-                videoUrl: link // 返回原链接，让用户在浏览器中打开
+                videoUrl: link,
+                type: "webpage"
             };
         }
 
@@ -623,27 +716,33 @@ async function loadDetail(link) {
         if (!videoUrl.startsWith('http')) {
             if (videoUrl.startsWith('//')) {
                 videoUrl = `https:${videoUrl}`;
-            } else {
+            } else if (videoUrl.startsWith('/')) {
                 videoUrl = `https://ddys.mov${videoUrl}`;
+            } else {
+                videoUrl = `https://ddys.mov/${videoUrl}`;
             }
         }
 
+        console.log("✅ 最终播放链接:", videoUrl);
+
         return {
             id: link,
-            type: "detail", 
+            type: "video",
             videoUrl: videoUrl,
             mediaType: "movie",
             customHeaders: {
                 "Referer": link,
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                "Accept": "*/*"
+                "Accept": "*/*",
+                "Origin": "https://ddys.mov"
             }
         };
 
     } catch (error) {
         console.error("❌ 获取播放链接失败:", error);
         return {
-            videoUrl: link // 出错时返回原链接
+            videoUrl: link,
+            type: "webpage"
         };
     }
 } 
